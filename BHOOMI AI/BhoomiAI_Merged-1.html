@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BhoomiAI — Land to Home</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {},
+        },
+      };
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      const app = document.getElementById("app");
+
+      const state = {
+        screen: "landing",
+        showAuth: false,
+        authMode: "login",
+        role: "consumer",
+        active: "Overview",
+        image: null,
+        analyzing: false,
+        analyzed: false,
+        generating: false,
+        generated: false,
+        selectedDesign: 0,
+        formData: {
+          name: "",
+          contact: "",
+          location: "",
+          experience: "",
+          email: "",
+          password: "",
+        },
+        authError: "",
+        currentUser: null,
+        siteData: {
+          location: "Haridwar, Uttarakhand",
+          length: "60",
+          width: "40",
+          direction: "North",
+          road: "East",
+          slope: "Mostly Flat",
+          vegetation: "Moderate",
+        },
+        requirements: {
+          floors: "2 Floors",
+          bedrooms: "3 Bedrooms",
+          bathrooms: "3 Bathrooms",
+          kitchen: "Open Kitchen",
+          parking: "1 Car",
+          balcony: "Yes",
+          garden: "Yes",
+          vastu: "Vastu Preferred",
+          style: "Modern",
+          budget: "₹40–50 Lakhs",
+          family: "4–5 Members",
+          special: "",
+        },
+      };
+      state.projects = JSON.parse(
+        localStorage.getItem("bhoomiai_projects") || "[]",
+      );
+      state.costRate = 1800;
+
+      function openProject(id) {
+        const p = state.projects.find((x) => x.id === id);
+        if (!p) return;
+        state.siteData = { ...p.siteData };
+        state.requirements = { ...p.requirements };
+        state.analyzed = true;
+        state.active = "Land Analysis";
+        render();
+      }
+
+      function saveProject() {
+        const project = {
+          id: Date.now(),
+          name: state.siteData.location + " Home",
+          savedAt: new Date().toLocaleString(),
+          siteData: { ...state.siteData },
+          requirements: { ...state.requirements },
+          area: plotArea(),
+          builtUp: builtUpArea(),
+        };
+        state.projects = [
+          project,
+          ...state.projects.filter((p) => p.name !== project.name),
+        ].slice(0, 20);
+        localStorage.setItem(
+          "bhoomiai_projects",
+          JSON.stringify(state.projects),
+        );
+        return project;
+      }
+
+      function plotArea() {
+        const l = Number(state.siteData.length),
+          w = Number(state.siteData.width);
+        return Number.isFinite(l) && Number.isFinite(w) && l > 0 && w > 0
+          ? l * w
+          : 0;
+      }
+
+      function floorsCount() {
+        const m = String(state.requirements.floors).match(/\d+/);
+        return m ? Number(m[0]) : 1;
+      }
+
+      function builtUpArea() {
+        return Math.round(plotArea() * 0.65 * floorsCount());
+      }
+
+      function money(n) {
+        return "₹" + Math.round(n).toLocaleString("en-IN");
+      }
+
+      function downloadReport() {
+        const area = plotArea(),
+          built = builtUpArea(),
+          rate = Number(state.costRate) || 1800;
+        const report = `BHOOMIAI — PRELIMINARY PROJECT REPORT\nGenerated: ${new Date().toLocaleString()}\n\nSITE DETAILS\nLocation: ${state.siteData.location}\nPlot dimensions: ${state.siteData.length} ft × ${state.siteData.width} ft\nPlot area: ${area.toLocaleString()} sq.ft\nRoad access: ${state.siteData.road}\nOrientation: ${state.siteData.direction}\nTerrain: ${state.siteData.slope}\nVegetation: ${state.siteData.vegetation}\n\nHOUSE REQUIREMENTS\n${Object.entries(
+          state.requirements,
+        )
+          .map(([k, v]) => k + ": " + v)
+          .join(
+            "\n",
+          )}\n\nPRELIMINARY COST MODEL\nAssumed built-up area: ${built.toLocaleString()} sq.ft (65% plot coverage per floor × ${floorsCount()} floor(s))\nAssumed rate: ${money(rate)} per sq.ft\nIndicative base cost: ${money(built * rate)}\nIllustrative range (±15%): ${money(built * rate * 0.85)} – ${money(built * rate * 1.15)}\n\nLIMITATIONS\nThis report is a prototype planning aid. Site suitability, climate, legal setbacks, structural design, permits, and local rates have not been independently verified. Cost figures are illustrative only and are not a construction quotation. Consult licensed local professionals before building.`;
+        const blob = new Blob([report], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "BhoomiAI-project-report.txt";
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      const esc = (s) =>
+        String(s ?? "").replace(
+          /[&<>"']/g,
+          (m) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[m],
+        );
+
+      function setState(p) {
+        Object.assign(state, p);
+        render();
+      }
+
+      function openSignup() {
+        state.authError = "";
+        state.formData.password = "";
+        setState({ authMode: "signup", showAuth: true });
+      }
+
+      function openLogin() {
+        state.authError = "";
+        state.formData.password = "";
+        setState({ authMode: "login", showAuth: true });
+      }
+
+      function logout() {
+        setState({ screen: "landing", showAuth: false });
+      }
+
+      function authSubmit(e) {
+        e.preventDefault();
+        const email = String(state.formData.email || "")
+          .trim()
+          .toLowerCase();
+        const password = String(state.formData.password || "");
+        state.authError = "";
+        if (!email || !password) {
+          state.authError = "Please enter both email and password.";
+          render();
+          return;
+        }
+        let users = [];
+        try {
+          users = JSON.parse(
+            localStorage.getItem("bhoomiai_demo_users") || "[]",
+          );
+          if (!Array.isArray(users)) users = [];
+        } catch (_) {
+          users = [];
+        }
+        if (state.authMode === "signup") {
+          if (password.length < 6) {
+            state.authError = "Password must be at least 6 characters.";
+            render();
+            return;
+          }
+          if (users.some((u) => u.email === email)) {
+            state.authError =
+              "An account with this email already exists. Please log in.";
+            render();
+            return;
+          }
+          const user = {
+            email,
+            password,
+            role: state.role,
+            name: String(state.formData.name || "").trim(),
+            contact: String(state.formData.contact || "").trim(),
+            location: String(state.formData.location || "").trim(),
+            experience: String(state.formData.experience || "").trim(),
+          };
+          users.push(user);
+          localStorage.setItem("bhoomiai_demo_users", JSON.stringify(users));
+          state.currentUser = user;
+        } else {
+          const user = users.find((u) => u.email === email);
+          if (!user) {
+            state.authError =
+              "No account found for this email. Please sign up first.";
+            render();
+            return;
+          }
+          if (user.password !== password) {
+            state.authError = "Incorrect password. Please try again.";
+            render();
+            return;
+          }
+          state.currentUser = user;
+          state.role = user.role || "consumer";
+          state.formData.name = user.name || "";
+          state.formData.contact = user.contact || "";
+          state.formData.location = user.location || "";
+          state.formData.experience = user.experience || "";
+        }
+        state.authError = "";
+        setState({
+          showAuth: false,
+          screen:
+            (state.currentUser.role || state.role) === "consumer"
+              ? "dashboard"
+              : "seller",
+        });
+      }
+
+      function icon(item) {
+        return (
+          {
+            Overview: "⌂",
+            "My Projects": "▣",
+            "Land Analysis": "◎",
+            "House Designs": "⌂",
+            "3D Studio": "◇",
+            Materials: "▤",
+            "Cost Estimate": "₹",
+            Profile: "○",
+          }[item] || "•"
+        );
+      }
+
+      function stat(n, l) {
+        return `<div><div class="text-2xl font-bold">${n}</div><div class="mt-1 text-xs text-[#718078]">${l}</div></div>`;
+      }
+
+      function mini(l, v) {
+        return `<div class="rounded-xl bg-white/70 p-3"><div class="text-[10px] uppercase tracking-wider text-[#738078]">${l}</div><div class="mt-1 text-sm font-bold">${v}</div></div>`;
+      }
+
+      function feature(i, t, x) {
+        return `<div class="rounded-3xl border border-white/10 bg-white/5 p-6"><div class="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 text-xl">${i}</div><div class="mt-5 text-lg font-bold">${t}</div><div class="mt-2 text-sm leading-6 text-[#b5c8bd]">${x}</div></div>`;
+      }
+
+      function step(n, t, x) {
+        return `<div class="rounded-3xl border border-[#dce3da] bg-white p-6 shadow-sm"><div class="text-sm font-bold text-[#4d795b]">${n}</div><div class="mt-4 text-lg font-bold">${t}</div><div class="mt-2 text-sm leading-6 text-[#758179]">${x}</div></div>`;
+      }
+
+      function dashPreview(t, v, s) {
+        return `<div class="rounded-2xl border border-[#e2e7e1] p-4"><div class="text-xs text-[#77847d]">${t}</div><div class="mt-2 text-2xl font-bold">${v}<span class="ml-1 text-xs font-semibold text-[#77847d]">${s}</span></div></div>`;
+      }
+
+      function dashStat(t, v, s, i) {
+        return `<div class="rounded-2xl border border-[#dfe5dd] bg-white p-5 shadow-sm"><div class="flex items-center justify-between"><div><div class="text-xs text-[#7b877f]">${t}</div><div class="mt-2 text-2xl font-bold">${v}<span class="ml-1 text-xs text-[#7b877f]">${s}</span></div></div><div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#edf3eb] text-[#31543e]">${i}</div></div></div>`;
+      }
+
+      function progress(l, v) {
+        return `<div><div class="flex justify-between text-xs font-semibold"><span>${l}</span><span>${v}%</span></div><div class="mt-2 h-2 rounded-full bg-[#e8eee6]"><div class="h-full rounded-full bg-[#6e9277]" style="width:${v}%"></div></div></div>`;
+      }
+
+      function quick(i, t, x, fn) {
+        return `<button onclick="${fn}" class="flex w-full items-center gap-4 rounded-2xl border border-[#e2e7e1] p-4 text-left hover:bg-[#f5f7f3]"><span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#edf3eb] text-[#31543e]">${i}</span><span><span class="block text-sm font-bold">${t}</span><span class="mt-1 block text-xs text-[#77847d]">${x}</span></span><span class="ml-auto text-[#7b877f]">→</span></button>`;
+      }
+
+      function activity(n, t, x) {
+        return `<div class="rounded-2xl border border-[#e2e7e1] p-4"><div class="text-xs font-bold text-[#718078]">${n}</div><div class="mt-2 font-bold">${t}</div><div class="mt-1 text-xs text-[#77847d]">${x}</div></div>`;
+      }
+
+      function landing() {
+        return `<main class="min-h-screen bg-[#f6f7f2] text-[#14251d]"><nav class="border-b border-[#dfe5dc] bg-[#f6f7f2]/95"><div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-5"><div class="flex items-center gap-3"><div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#163d2b] text-xl text-white">◈</div><div><div class="text-xl font-bold tracking-tight">BhoomiAI</div><div class="text-[10px] uppercase tracking-[0.25em] text-[#718078]">Land to Home</div></div></div><div class="hidden items-center gap-8 text-sm text-[#5f6e65] md:flex"><a href="#features">Features</a><a href="#how">How it works</a><a href="#solutions">Solutions</a><a href="#about">About</a></div><div class="flex items-center gap-3"><button onclick="openLogin()" class="hidden rounded-full px-4 py-2 text-sm font-medium text-[#163d2b] hover:bg-[#e8eee7] sm:block">Login</button><button onclick="openSignup()" class="rounded-full bg-[#163d2b] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#0f2d20]">Start Designing</button></div></div></nav>
+<section class="mx-auto grid max-w-7xl items-center gap-14 px-6 py-20 lg:grid-cols-2 lg:py-28"><div><div class="mb-6 inline-flex items-center gap-2 rounded-full border border-[#cbd8cb] bg-[#edf3ec] px-4 py-2 text-xs font-semibold text-[#31533f]"><span class="h-2 w-2 rounded-full bg-[#4f8a63]"></span>AI-powered architectural intelligence</div><h1 class="max-w-2xl text-5xl font-bold leading-[1.05] tracking-tight md:text-7xl">Turn your land into your<span class="text-[#4d795b]"> dream home.</span></h1><p class="mt-7 max-w-xl text-lg leading-8 text-[#66736c]">BhoomiAI transforms a simple piece of land into a complete intelligent home plan — from climate analysis and Vastu-aware orientation to 3D visualization, materials and cost estimation.</p><div class="mt-9 flex flex-wrap gap-4"><button onclick="openSignup()" class="rounded-full bg-[#163d2b] px-7 py-4 text-sm font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-[#0f2d20]">Start with your land →</button><a href="#how" class="rounded-full border border-[#cfd8d0] bg-white px-7 py-4 text-sm font-semibold text-[#254334]">See how it works</a></div><div class="mt-12 grid max-w-lg grid-cols-3 gap-6">${stat("AI", "Land Analysis")}${stat("3D", "Home Visualization")}${stat("360°", "Design Control")}</div></div>
+<div class="relative"><div class="absolute -inset-10 rounded-full bg-[#dce9dc] blur-3xl"></div><div class="relative overflow-hidden rounded-[32px] border border-[#d9e0d8] bg-white p-4 shadow-2xl"><div class="rounded-[25px] bg-[#dfe9dd] p-5"><div class="mb-4 flex items-center justify-between"><div><div class="text-xs font-semibold uppercase tracking-[0.18em] text-[#65776b]">AI Analysis</div><div class="mt-1 text-lg font-bold">Your land, understood.</div></div><div class="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-[#39704f]">94% Match</div></div><div class="relative h-[390px] overflow-hidden rounded-[22px] bg-[#c6d9bf]"><div class="absolute inset-0 opacity-40"><div class="h-full w-full" style="background-image:linear-gradient(30deg,transparent 48%,rgba(255,255,255,.5) 49%,transparent 50%),linear-gradient(120deg,transparent 48%,rgba(255,255,255,.4) 49%,transparent 50%);background-size:80px 80px"></div></div><div class="absolute bottom-12 left-10 right-10 h-44 rotate-[-5deg] rounded-[12px] border-2 border-dashed border-[#3f6749] bg-[#b5cfaa]/70"></div><div class="absolute bottom-20 left-1/2 w-48 -translate-x-1/2"><div class="relative mx-auto h-24 w-40 rounded-sm bg-[#f4f0e7] shadow-xl"><div class="absolute -top-14 left-[-10px] h-0 w-0 border-l-[90px] border-r-[90px] border-b-[70px] border-l-transparent border-r-transparent border-b-[#7c987e]"></div><div class="absolute left-7 top-8 h-10 w-7 rounded-sm bg-[#7e9eae]"></div><div class="absolute right-7 top-8 h-10 w-7 rounded-sm bg-[#7e9eae]"></div><div class="absolute bottom-0 left-1/2 h-14 w-9 -translate-x-1/2 bg-[#795d48]"></div></div></div><div class="absolute left-4 top-4 rounded-xl bg-white/90 px-3 py-2 shadow-lg backdrop-blur"><div class="text-[10px] uppercase tracking-wider text-[#738078]">Plot</div><div class="font-bold">2,400 sq.ft</div></div><div class="absolute bottom-4 right-4 rounded-xl bg-[#163d2b]/95 px-4 py-3 text-white shadow-lg"><div class="text-[10px] uppercase tracking-wider text-[#a8c2b1]">Location</div><div class="text-sm font-semibold">Haridwar, Uttarakhand</div></div></div><div class="mt-4 grid grid-cols-3 gap-3">${mini("Climate", "28°C")}${mini("Humidity", "68%")}${mini("Wind", "14 km/h")}</div></div></div></div></section>
+<section id="features" class="bg-[#123526] px-6 py-24 text-white"><div class="mx-auto max-w-7xl"><div class="max-w-2xl"><div class="text-xs font-bold uppercase tracking-[0.25em] text-[#9bbca5]">Everything connected</div><h2 class="mt-4 text-4xl font-bold tracking-tight md:text-5xl">From empty plot to<span class="text-[#a8c99f]"> intelligent home.</span></h2><p class="mt-5 leading-7 text-[#b5c8bd]">BhoomiAI combines architectural planning, environmental intelligence and construction insights in one platform.</p></div><div class="mt-14 grid gap-5 md:grid-cols-2 lg:grid-cols-3">${feature("☀", "Climate Intelligence", "Understand temperature, rainfall, humidity, wind and sunlight before designing your home.")}${feature("⌖", "Direction & Vastu", "Optimize orientation, entrances, rooms and sunlight using direction-aware planning.")}${feature("▦", "AI Floor Plan", "Generate intelligent floor plans based on your family, plot size and lifestyle.")}${feature("◇", "3D House", "Explore your future home in an interactive three-dimensional environment.")}${feature("▤", "Smart Materials", "Get climate-suitable construction materials with practical recommendations.")}${feature("₹", "Cost Estimate", "Understand construction cost ranges before making major decisions.")}</div></div></section>
+<section id="how" class="bg-[#f6f7f2] px-6 py-24"><div class="mx-auto max-w-7xl"><div class="text-center"><div class="text-xs font-bold uppercase tracking-[0.25em] text-[#708077]">How it works</div><h2 class="mt-4 text-4xl font-bold tracking-tight">One platform. Complete journey.</h2></div><div class="mt-14 grid gap-6 md:grid-cols-4">${step("01", "Upload Land", "Upload your land image and enter basic site information.")}${step("02", "AI Analysis", "BhoomiAI understands plot conditions, climate and orientation.")}${step("03", "Generate Home", "Create floor plans, materials and a complete architectural concept.")}${step("04", "Explore in 3D", "Walk through your future home before construction begins.")}</div></div></section>
+${dashboardPreview()}<section id="about" class="px-6 py-24"><div class="mx-auto max-w-5xl text-center"><div class="text-xs font-bold uppercase tracking-[0.25em] text-[#718078]">Built for better decisions</div><h2 class="mt-4 text-4xl font-bold md:text-5xl">Design with intelligence,<span class="text-[#4d795b]"> not guesswork.</span></h2><p class="mx-auto mt-6 max-w-2xl leading-8 text-[#68766e]">BhoomiAI brings architectural thinking, environmental data and modern AI together so homeowners can make better decisions before construction begins.</p><button onclick="openSignup()" class="mt-8 rounded-full bg-[#163d2b] px-7 py-4 text-sm font-bold text-white">Start your project →</button></div></section><footer class="border-t border-[#dce3db] bg-[#f0f2ed] px-6 py-10"><div class="mx-auto flex max-w-7xl flex-col justify-between gap-5 md:flex-row md:items-center"><div><div class="font-bold">BhoomiAI</div><div class="mt-1 text-sm text-[#718078]">From land to home, intelligently.</div></div><div class="text-sm text-[#718078]">© 2026 BhoomiAI. Built for intelligent living.</div></div></footer></main>`;
+      }
+
+      function dashboardPreview() {
+        return `<section id="solutions" class="bg-[#eef1eb] px-6 py-24"><div class="mx-auto max-w-7xl"><div class="mb-10 flex items-end justify-between gap-6"><div><div class="text-xs font-bold uppercase tracking-[0.25em] text-[#718078]">Your workspace</div><h2 class="mt-3 text-4xl font-bold">Everything in one dashboard.</h2></div><button onclick="openSignup()" class="hidden rounded-full bg-[#163d2b] px-5 py-3 text-sm font-bold text-white md:block">Open Dashboard →</button></div><div class="overflow-hidden rounded-[28px] border border-[#d4ddd3] bg-white shadow-xl"><div class="grid lg:grid-cols-[220px_1fr]"><div class="border-b border-[#e0e5df] bg-[#f8faf7] p-4 lg:border-b-0 lg:border-r"><div class="mb-7 flex items-center gap-2 px-2"><div class="flex h-8 w-8 items-center justify-center rounded-lg bg-[#163d2b] text-white">◈</div><span class="font-bold">BhoomiAI</span></div><div class="space-y-1">${["Overview", "Land Analysis", "Climate", "Floor Plan", "3D House", "Materials", "Cost Estimate"].map((x, i) => `<div class="rounded-xl px-3 py-2.5 text-sm ${i === 0 ? "bg-[#e0ebdf] font-semibold text-[#245039]" : "text-[#68766e]"}">${x}</div>`).join("")}</div></div><div class="p-6 lg:p-8"><div class="flex items-center justify-between"><div><div class="text-2xl font-bold">Good morning 👋</div><div class="mt-1 text-sm text-[#77847d]">Here is your project overview.</div></div><button onclick="openSignup()" class="rounded-xl bg-[#163d2b] px-4 py-2.5 text-sm font-bold text-white">+ New Project</button></div><div class="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">${dashPreview("Land Area", "2,400", "sq.ft")}${dashPreview("Climate", "28°", "C")}${dashPreview("Sustainability", "87", "/100")}${dashPreview("Design Progress", "62", "%")}</div><div class="mt-6 grid gap-5 lg:grid-cols-2"><div class="rounded-2xl border border-[#e2e7e1] p-5"><div class="flex items-center justify-between"><div class="font-bold">Floor Plan</div><div class="text-xs text-[#708078]">Ground Floor</div></div><div class="mt-5 h-52 rounded-xl bg-[#f1f3ef] p-5"><div class="grid h-full grid-cols-4 grid-rows-3 gap-2"><div class="col-span-2 row-span-2 rounded-md border-2 border-[#98aa9d] bg-white"></div><div class="rounded-md border-2 border-[#98aa9d] bg-white"></div><div class="rounded-md border-2 border-[#98aa9d] bg-white"></div><div class="rounded-md border-2 border-[#98aa9d] bg-white"></div><div class="col-span-2 rounded-md border-2 border-[#98aa9d] bg-white"></div><div class="rounded-md border-2 border-[#98aa9d] bg-white"></div></div></div></div><div class="rounded-2xl border border-[#e2e7e1] p-5"><div class="font-bold">3D House</div><div class="mt-5 flex h-52 items-center justify-center overflow-hidden rounded-xl bg-[#dfe8dc]"><div class="relative mt-8 h-28 w-44 bg-[#f2eee5] shadow-xl"><div class="absolute -top-16 left-[-15px] h-0 w-0 border-l-[100px] border-r-[100px] border-b-[75px] border-l-transparent border-r-transparent border-b-[#79947d]"></div><div class="absolute left-7 top-10 h-9 w-7 bg-[#7697a5]"></div><div class="absolute right-7 top-10 h-9 w-7 bg-[#7697a5]"></div><div class="absolute bottom-0 left-1/2 h-14 w-9 -translate-x-1/2 bg-[#795d48]"></div></div></div></div></div></div></div></div></section>`;
+      }
+
+      function dashboard() {
+        const items = [
+          "Overview",
+          "My Projects",
+          "Land Analysis",
+          "House Designs",
+          "3D Studio",
+          "Materials",
+          "Cost Estimate",
+          "Profile",
+        ];
+        return `<main class="min-h-screen bg-[#f4f6f1] text-[#14251d]"><div class="flex min-h-screen"><aside class="hidden w-[245px] shrink-0 border-r border-[#dce3db] bg-[#f9faf7] lg:block"><div class="flex h-full flex-col p-5"><div class="flex items-center gap-3 px-2 py-3"><div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#163d2b] text-xl text-white">◈</div><div><div class="font-bold">BhoomiAI</div><div class="text-[9px] uppercase tracking-[0.22em] text-[#7b887f]">Consumer</div></div></div><div class="mt-8"><div class="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-[#87928b]">Workspace</div><div class="space-y-1">${items.map((x) => `<button onclick="nav('${x.replace(/'/g, "\\'")}')" class="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm ${state.active === x ? "bg-[#e0ebdf] font-semibold text-[#245039]" : "text-[#65736b] hover:bg-[#edf1eb]"}"><span class="w-5 text-center">${icon(x)}</span>${x}</button>`).join("")}</div></div><div class="mt-auto"><div class="mb-4 rounded-2xl bg-[#edf2eb] p-4"><div class="text-xs font-semibold text-[#31543e]">AI Design Assistant</div><div class="mt-2 text-xs leading-5 text-[#748078]">Continue creating your dream home.</div><button onclick="nav('Land Analysis')" class="mt-3 text-xs font-bold text-[#245039]">Start analysis →</button></div><button onclick="logout()" class="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm text-[#68756d] hover:bg-[#edf1eb]"><span>↪</span>Logout</button></div></div></aside><div class="fixed left-0 right-0 top-0 z-30 flex items-center justify-between border-b border-[#dce3db] bg-[#f9faf7] px-5 py-4 lg:hidden"><div class="flex items-center gap-2"><div class="flex h-9 w-9 items-center justify-center rounded-lg bg-[#163d2b] text-white">◈</div><span class="font-bold">BhoomiAI</span></div><button onclick="logout()" class="text-sm font-semibold text-[#31543e]">Logout</button></div><section class="min-w-0 flex-1 pt-20 lg:pt-0">${dashboardContent()}</section></div></main>`;
+      }
+
+      function dashboardContent() {
+        if (state.active === "3D Studio") return threeDStudio();
+        if (state.active === "Land Analysis") return landAnalysis();
+        if (state.active === "House Designs") return houseDesign();
+        if (state.active === "Overview") return overview();
+        if (state.active === "Cost Estimate") return costEstimate();
+        if (state.active === "My Projects") return myProjects();
+        if (state.active === "Materials") return materialsPage();
+        if (state.active === "Profile") return profilePage();
+        return placeholder(state.active);
+      }
+
+      function overview() {
+        return `<div class="mx-auto max-w-7xl p-5 md:p-8 lg:p-10"><div class="flex flex-col justify-between gap-5 md:flex-row md:items-center"><div><div class="text-sm font-medium text-[#758179]">Consumer Dashboard</div><h1 class="mt-1 text-3xl font-bold tracking-tight md:text-4xl">Your Dashboard</h1><p class="mt-2 text-sm text-[#758179]">Continue building your dream home.</p></div><button onclick="nav('Land Analysis')" class="rounded-xl bg-[#163d2b] px-5 py-3 text-sm font-bold text-white shadow-sm">+ New Project</button></div><div class="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">${dashStat("Land Area", "2,400", "sq.ft", "⌂")}${dashStat("Climate", "28°", "C", "☀")}${dashStat("Sustainability", "87", "/100", "♧")}${dashStat("Design Progress", "62", "%", "◒")}</div><div class="mt-8 grid gap-6 xl:grid-cols-[1.5fr_1fr]"><div class="rounded-2xl border border-[#dfe5dd] bg-white p-6 shadow-sm"><div class="flex items-center justify-between"><div><div class="text-xs font-bold uppercase tracking-[0.18em] text-[#7b877f]">Current project</div><h2 class="mt-2 text-xl font-bold">Haridwar Family Home</h2></div><div class="rounded-full bg-[#e8f0e7] px-3 py-1.5 text-xs font-bold text-[#396148]">In Progress</div></div><div class="mt-7 grid gap-4 sm:grid-cols-3">${progress("Land Analysis", 100)}${progress("House Design", 70)}${progress("3D Model", 35)}</div><button onclick="nav('Land Analysis')" class="mt-7 rounded-xl border border-[#cad7ca] px-4 py-3 text-sm font-bold text-[#31543e]">Open Land Analysis →</button></div><div class="rounded-2xl border border-[#dfe5dd] bg-white p-6 shadow-sm"><div class="text-xs font-bold uppercase tracking-[0.18em] text-[#7b877f]">Quick actions</div><div class="mt-5 space-y-3">${quick("◎", "Analyze Land", "Upload your land and get AI insights.", "nav('Land Analysis')")}${quick("⌂", "House Designs", "Create your AI home concepts.", "nav('House Designs')")}${quick("◇", "Open 3D Studio", "Explore your house in 3D.", "nav('3D Studio')")}${quick("₹", "Estimate Cost", "Calculate construction cost.", "nav('Cost Estimate')")}</div></div></div><div class="mt-8 rounded-2xl border border-[#dfe5dd] bg-white p-6 shadow-sm"><div class="flex items-center justify-between"><div><div class="text-xs font-bold uppercase tracking-[0.18em] text-[#7b877f]">Recent activity</div><h2 class="mt-2 text-xl font-bold">Your design journey</h2></div><button onclick="nav('Land Analysis')" class="text-sm font-bold text-[#31543e]">Continue →</button></div><div class="mt-6 grid gap-3 md:grid-cols-3">${activity("01", "Land Analysis", "Completed")}${activity("02", "House Design", "In progress")}${activity("03", "3D Visualization", "Upcoming")}</div></div></div>`;
+      }
+
+      function selectField(label, key, options) {
+        return `<div><label class="mb-2 block text-xs font-bold text-[#526159]">${label}</label><select onchange="state.siteData['${key}']=this.value;render()" class="w-full rounded-xl border border-[#d5ded5] bg-[#fafbf9] px-4 py-3 text-sm outline-none focus:border-[#78967e]">${options.map((o) => `<option ${state.siteData[key] === o ? "selected" : ""}>${o}</option>`).join("")}</select></div>`;
+      }
+
+      function analysisStep(n, t, active = false, done = false) {
+        return `<div class="flex items-center gap-2"><div class="flex h-10 w-10 items-center justify-center rounded-xl ${active ? "bg-[#163d2b] text-white" : "bg-[#edf2eb] text-[#6f8075]"} text-xs font-bold">${done ? "✓" : n}</div><div><div class="text-[10px] uppercase tracking-wider text-[#7b877f]">Step</div><div class="text-sm font-bold">${t}</div></div></div>`;
+      }
+
+      function resultCard(i, l, v, d) {
+        return `<div class="rounded-2xl border border-[#dfe5dd] bg-white p-5"><div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#edf3eb] text-[#31543e]">${i}</div><div class="mt-4 text-xs font-bold uppercase tracking-wider text-[#7b877f]">${l}</div><div class="mt-1 text-lg font-bold">${v}</div><div class="mt-1 text-xs text-[#77847d]">${d}</div></div>`;
+      }
+
+      function landAnalysis() {
+        const sd = state.siteData;
+        return `<div class="mx-auto max-w-7xl p-5 md:p-8 lg:p-10"><div class="flex flex-col justify-between gap-5 md:flex-row md:items-center"><div><button onclick="nav('Overview')" class="mb-3 text-sm font-semibold text-[#5f7166]">← Back to Dashboard</button><div class="text-sm font-medium text-[#758179]">Step 01 of your home journey</div><h1 class="mt-1 text-3xl font-bold tracking-tight md:text-4xl">Land Analysis</h1><p class="mt-2 max-w-2xl text-sm leading-6 text-[#758179]">Give BhoomiAI some information about your land. Our AI will analyze the site and prepare it for the house design stage.</p></div><div class="rounded-2xl border border-[#dce6db] bg-[#edf3eb] px-5 py-4"><div class="text-xs font-bold uppercase tracking-[0.15em] text-[#708078]">Analysis status</div><div class="mt-1 flex items-center gap-2 text-sm font-bold text-[#31543e]"><span class="h-2.5 w-2.5 rounded-full ${state.analyzed ? "bg-[#4d8b5c]" : "bg-[#c49b45]"}"></span>${state.analyzed ? "Analysis Complete" : "Ready to Analyze"}</div></div></div><div class="mt-8 flex items-center gap-2 overflow-x-auto pb-2">${analysisStep("01", "Land", true)}<div class="h-px w-12 bg-[#cdd8cd]"></div>${analysisStep("02", "Climate")}<div class="h-px w-12 bg-[#cdd8cd]"></div>${analysisStep("03", "Design")}<div class="h-px w-12 bg-[#cdd8cd]"></div>${analysisStep("04", "3D Home")}</div><div class="mt-8 grid gap-6 xl:grid-cols-[1fr_1.1fr]"><div class="rounded-3xl border border-[#dce3da] bg-white p-6 shadow-sm"><div class="flex items-center justify-between"><div><div class="text-xs font-bold uppercase tracking-[0.18em] text-[#7b877f]">Site image</div><h2 class="mt-2 text-xl font-bold">Upload your land</h2></div><div class="rounded-xl bg-[#edf3eb] px-3 py-2 text-xs font-bold text-[#3c644b]">JPG / PNG</div></div><label class="mt-6 block cursor-pointer"><input id="landFile" type="file" accept="image/*" onchange="uploadLand(event)" class="hidden"><div class="relative flex min-h-[330px] items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed ${state.image ? "border-[#9db5a1] bg-[#edf2ea]" : "border-[#cbd7cb] bg-[#f8faf7]"}">${state.image ? `<img src="${state.image}" class="absolute inset-0 h-full w-full object-cover"><div class="absolute inset-0 bg-black/20"></div><div class="relative rounded-xl bg-white/95 px-5 py-3 text-center shadow-lg"><div class="text-sm font-bold text-[#244333]">Land image uploaded</div><div class="mt-1 text-xs text-[#748078]">Click to replace image</div></div>` : `<div class="px-6 text-center"><div class="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[#e5eee3] text-2xl text-[#3d684c]">↑</div><div class="mt-5 text-lg font-bold">Upload a photo of your land</div><div class="mx-auto mt-2 max-w-sm text-sm leading-6 text-[#7a867f]">Take a clear photo showing the plot, surrounding road, vegetation and nearby structures if possible.</div><div class="mt-5 inline-flex rounded-full bg-[#163d2b] px-5 py-2.5 text-xs font-bold text-white">Choose Image</div></div>`}</div></label><div class="mt-5 rounded-xl bg-[#f4f7f2] p-4 text-xs leading-5 text-[#748078]"><strong class="text-[#31543e]">Tip:</strong> A photo taken from a higher viewpoint gives better visibility of the plot boundary and surrounding conditions.</div></div><div class="rounded-3xl border border-[#dce3da] bg-white p-6 shadow-sm"><div><div class="text-xs font-bold uppercase tracking-[0.18em] text-[#7b877f]">Site information</div><h2 class="mt-2 text-xl font-bold">Tell us about the plot</h2><p class="mt-2 text-sm text-[#7a867f]">These details help BhoomiAI understand the land more accurately.</p></div><div class="mt-6 space-y-5"><div><label class="mb-2 block text-xs font-bold text-[#526159]">Location</label><input value="${esc(sd.location)}" oninput="state.siteData.location=this.value" class="w-full rounded-xl border border-[#d5ded5] bg-[#fafbf9] px-4 py-3 text-sm outline-none focus:border-[#78967e]" placeholder="City, State"></div><div><label class="mb-2 block text-xs font-bold text-[#526159]">Approximate plot dimensions</label><div class="grid grid-cols-2 gap-3"><div class="relative"><input value="${esc(sd.length)}" oninput="state.siteData.length=this.value" class="w-full rounded-xl border border-[#d5ded5] bg-[#fafbf9] px-4 py-3 pr-16 text-sm outline-none focus:border-[#78967e]"><span class="absolute right-4 top-3 text-xs text-[#849087]">ft length</span></div><div class="relative"><input value="${esc(sd.width)}" oninput="state.siteData.width=this.value" class="w-full rounded-xl border border-[#d5ded5] bg-[#fafbf9] px-4 py-3 pr-16 text-sm outline-none focus:border-[#78967e]"><span class="absolute right-4 top-3 text-xs text-[#849087]">ft width</span></div></div></div><div class="grid gap-4 sm:grid-cols-2">${selectField("Main direction", "direction", ["North", "South", "East", "West", "North-East", "North-West", "South-East", "South-West"])}${selectField("Road access", "road", ["North", "South", "East", "West", "North + East", "North + West", "South + East", "South + West"])}</div><div class="grid gap-4 sm:grid-cols-2">${selectField("Terrain / slope", "slope", ["Mostly Flat", "Slight Slope", "Moderate Slope", "Steep Slope"])}${selectField("Vegetation", "vegetation", ["Low", "Moderate", "High"])}</div></div><button onclick="runAnalysis()" ${state.analyzing ? "disabled" : ""} class="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-[#163d2b] px-5 py-4 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-70">${state.analyzing ? '<span class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"></span>Analyzing your land...' : "✦ Run AI Land Analysis"}</button></div></div>${state.analyzed ? analysisResults() : `<div class="mt-8 rounded-3xl border border-[#dce3da] bg-[#edf2eb] p-6"><div class="flex gap-4"><div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-[#31543e] shadow-sm">✦</div><div><div class="font-bold text-[#31543e]">What will BhoomiAI analyze?</div><div class="mt-1 max-w-3xl text-sm leading-6 text-[#718078]">Plot dimensions, orientation, road access, terrain, vegetation, sunlight potential and an initial climate profile.</div></div></div></div>`}</div>`;
+      }
+
+      function uploadLand(e) {
+        const f = e.target.files?.[0];
+        if (!f) return;
+        state.image = URL.createObjectURL(f);
+        state.analyzed = false;
+        render();
+      }
+
+      function runAnalysis() {
+        const l = Number(state.siteData.length),
+          w = Number(state.siteData.width);
+        if (
+          !state.siteData.location.trim() ||
+          !Number.isFinite(l) ||
+          !Number.isFinite(w) ||
+          l <= 0 ||
+          w <= 0
+        ) {
+          alert("Please enter a location and positive plot dimensions.");
+          return;
+        }
+        state.analyzing = true;
+        render();
+        setTimeout(() => {
+          state.analyzing = false;
+          state.analyzed = true;
+          saveProject();
+          render();
+        }, 450);
+      }
+
+      function analysisResults() {
+        const sd = state.siteData,
+          area = plotArea();
+        const slopePenalty =
+          {
+            "Mostly Flat": 0,
+            "Slight Slope": 8,
+            "Moderate Slope": 18,
+            "Steep Slope": 30,
+          }[sd.slope] || 0;
+        const vegetationPenalty =
+          { Low: 0, Moderate: 3, High: 7 }[sd.vegetation] || 0;
+        const score = Math.max(
+          35,
+          Math.min(100, 100 - slopePenalty - vegetationPenalty),
+        );
+        const rec =
+          sd.slope === "Steep Slope"
+            ? "Arrange a site survey and geotechnical assessment before deciding foundations."
+            : sd.slope === "Moderate Slope"
+              ? "Ask a local architect or engineer to assess drainage, retaining needs, and foundation options."
+              : "Confirm setbacks, drainage, and soil conditions before finalizing the layout.";
+        return `<div class="mt-8"><div class="mb-5"><div class="text-xs font-bold uppercase tracking-[0.18em] text-[#718078]">Site assessment</div><h2 class="mt-2 text-2xl font-bold">Your preliminary site summary</h2><p class="mt-2 text-sm text-[#758179]">Calculated from the details you entered; this is not an AI or professional site survey.</p></div><div class="grid gap-5 lg:grid-cols-[1fr_1.5fr]"><div class="rounded-3xl bg-[#163d2b] p-7 text-white shadow-sm"><div class="text-xs font-bold uppercase tracking-[0.18em] text-[#a9c1af]">Rule-based readiness indicator</div><div class="mt-5 flex items-end gap-2"><div class="text-7xl font-bold">${score}</div><div class="mb-2 text-lg text-[#a9c1af]">/100</div></div><div class="mt-5 h-2 overflow-hidden rounded-full bg-white/15"><div class="h-full rounded-full bg-[#a8c99f]" style="width:${score}%"></div></div><p class="mt-5 text-sm leading-6 text-[#c3d2c8]">This indicator only reflects the selected slope and vegetation values. It is not a prediction of buildability or safety.</p><div class="mt-6 rounded-2xl bg-white/10 p-4"><div class="text-xs font-bold text-[#a8c99f]">Planning note</div><div class="mt-2 text-sm leading-6 text-[#d2ddd5]">${rec}</div></div></div><div class="grid gap-4 sm:grid-cols-2">${resultCard("⌂", "Calculated Plot Area", area.toLocaleString() + " sq.ft", sd.length + " × " + sd.width + " ft")}${resultCard("⌖", "Road Access", esc(sd.road), "Confirm actual road width and entry")}${resultCard("≈", "Terrain", esc(sd.slope), "Professional site assessment required")}${resultCard("♧", "Vegetation", esc(sd.vegetation), "Check trees and local restrictions")}${resultCard("◎", "Orientation", esc(sd.direction), "Verify with a site survey")}${resultCard("▦", "Built-up planning allowance", builtUpArea().toLocaleString() + " sq.ft", "Illustrative 65% coverage per floor")}</div></div><div class="mt-5 rounded-3xl border border-[#dce3da] bg-white p-6 shadow-sm"><div class="text-xs font-bold uppercase tracking-[0.18em] text-[#7b877f]">Climate and legal checks</div><h3 class="mt-2 text-xl font-bold">Data not connected yet</h3><p class="mt-2 text-sm leading-6 text-[#758179]">Live weather, soil, zoning, building bylaws, setbacks and flood-risk data are not connected in this prototype. Verify these with authoritative local sources before using the plan for real construction.</p></div><div class="mt-6 flex flex-col items-center justify-between gap-4 rounded-3xl border border-[#d6e0d5] bg-[#edf3eb] p-6 sm:flex-row"><div><div class="font-bold text-[#284a36]">Preliminary assessment complete</div><div class="mt-1 text-sm text-[#6f7e75]">Save the project or continue to your house requirements.</div></div><div class="flex flex-wrap gap-3"><button onclick="downloadReport()" class="rounded-xl border border-[#cad7ca] bg-white px-5 py-3.5 text-sm font-bold text-[#31543e]">Download report</button><button onclick="nav('House Designs')" class="rounded-xl bg-[#163d2b] px-6 py-3.5 text-sm font-bold text-white">Continue to House Design →</button></div></div></div>`;
+      }
+
+      function designSelect(label, key, opts) {
+        return `<div><label class="mb-2 block text-xs font-bold text-[#526159]">${label}</label><select onchange="state.requirements['${key}']=this.value;render()" class="w-full rounded-xl border border-[#d5ded5] bg-[#fafbf9] px-4 py-3 text-sm outline-none focus:border-[#78967e]">${opts.map((o) => `<option ${state.requirements[key] === o ? "selected" : ""}>${o}</option>`).join("")}</select></div>`;
+      }
+
+      function houseDesign() {
+        const r = state.requirements;
+        const fields = [
+          ["floors", "Number of floors", ["1 Floor", "2 Floors", "3 Floors"]],
+          [
+            "bedrooms",
+            "Bedrooms",
+            ["2 Bedrooms", "3 Bedrooms", "4 Bedrooms", "5 Bedrooms"],
+          ],
+          [
+            "bathrooms",
+            "Bathrooms",
+            ["2 Bathrooms", "3 Bathrooms", "4 Bathrooms", "5 Bathrooms"],
+          ],
+          [
+            "kitchen",
+            "Kitchen",
+            ["Closed Kitchen", "Open Kitchen", "Open + Utility"],
+          ],
+          [
+            "parking",
+            "Parking",
+            ["No Parking", "1 Car", "2 Cars", "2 Cars + Bikes"],
+          ],
+          ["balcony", "Balcony", ["Yes", "No", "Multiple Balconies"]],
+          ["garden", "Garden", ["Yes", "No", "Small Garden", "Large Garden"]],
+          [
+            "vastu",
+            "Vastu preference",
+            ["Vastu Preferred", "Strong Vastu", "No Vastu Preference"],
+          ],
+          [
+            "style",
+            "Design style",
+            ["Modern", "Contemporary", "Traditional", "Minimalist", "Luxury"],
+          ],
+          [
+            "budget",
+            "Budget",
+            [
+              "₹25–35 Lakhs",
+              "₹35–40 Lakhs",
+              "₹40–50 Lakhs",
+              "₹50–70 Lakhs",
+              "₹70 Lakhs+",
+            ],
+          ],
+          [
+            "family",
+            "Family size",
+            [
+              "1–2 Members",
+              "3 Members",
+              "4–5 Members",
+              "6–7 Members",
+              "8+ Members",
+            ],
+          ],
+        ];
+        return `<div class="mx-auto max-w-7xl p-5 md:p-8 lg:p-10"><div class="flex flex-col justify-between gap-5 md:flex-row md:items-center"><div><button onclick="nav('Land Analysis')" class="mb-3 text-sm font-semibold text-[#5f7166]">← Back to Land Analysis</button><div class="text-sm font-medium text-[#758179]">Step 02 of your home journey</div><h1 class="mt-1 text-3xl font-bold tracking-tight md:text-4xl">House Design</h1><p class="mt-2 max-w-2xl text-sm leading-6 text-[#758179]">Tell BhoomiAI how you want to live. We will use your land analysis, lifestyle and preferences to create suitable house concepts.</p></div><div class="rounded-2xl border border-[#dce6db] bg-[#edf3eb] px-5 py-4"><div class="text-xs font-bold uppercase tracking-[0.15em] text-[#708078]">Project location</div><div class="mt-1 text-sm font-bold text-[#31543e]">Haridwar, Uttarakhand</div></div></div><div class="mt-8 flex items-center gap-2 overflow-x-auto pb-2">${analysisStep("01", "Land", true, true)}<div class="h-px w-12 bg-[#9eb39f]"></div>${analysisStep("02", "Design", true)}<div class="h-px w-12 bg-[#cdd8cd]"></div>${analysisStep("03", "Floor Plan")}<div class="h-px w-12 bg-[#cdd8cd]"></div>${analysisStep("04", "3D Home")}</div><div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><div class="rounded-2xl border border-[#dfe5dd] bg-white p-5"><div class="text-xs text-[#7b877f]">Plot</div><div class="mt-2 font-bold">2,400 sq.ft</div></div><div class="rounded-2xl border border-[#dfe5dd] bg-white p-5"><div class="text-xs text-[#7b877f]">Orientation</div><div class="mt-2 font-bold">North</div></div><div class="rounded-2xl border border-[#dfe5dd] bg-white p-5"><div class="text-xs text-[#7b877f]">Road</div><div class="mt-2 font-bold">East</div></div><div class="rounded-2xl border border-[#dfe5dd] bg-white p-5"><div class="text-xs text-[#7b877f]">AI Site Score</div><div class="mt-2 font-bold">89 / 100</div></div></div><div class="mt-6 rounded-3xl border border-[#dce3da] bg-white p-6 shadow-sm md:p-8"><div class="flex flex-col justify-between gap-4 md:flex-row md:items-center"><div><div class="text-xs font-bold uppercase tracking-[0.18em] text-[#7b877f]">Your requirements</div><h2 class="mt-2 text-2xl font-bold">Design your way</h2><p class="mt-2 text-sm text-[#758179]">Choose what your family needs. BhoomiAI will use these preferences to create your house concepts.</p></div><div class="rounded-xl bg-[#f0f4ee] px-4 py-3 text-xs font-bold text-[#396148]">AI-assisted planning</div></div><div class="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-3">${fields.map((f) => designSelect(f[1], f[0], f[2])).join("")}</div><div class="mt-5"><label class="mb-2 block text-xs font-bold text-[#526159]">Special requirements</label><textarea oninput="state.requirements.special=this.value" rows="4" placeholder="Example: Need a home office, prayer room, elderly-friendly bedroom, rooftop garden..." class="w-full resize-none rounded-xl border border-[#d5ded5] bg-[#fafbf9] px-4 py-3 text-sm outline-none focus:border-[#78967e]">${esc(r.special)}</textarea></div><div class="mt-7 flex flex-col justify-between gap-4 rounded-2xl bg-[#edf3eb] p-5 md:flex-row md:items-center"><div><div class="font-bold text-[#31543e]">Ready to generate your home?</div><div class="mt-1 text-xs leading-5 text-[#718078]">BhoomiAI will combine your land analysis with these requirements to generate multiple concepts.</div></div><button onclick="generateDesigns()" ${state.generating ? "disabled" : ""} class="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#163d2b] px-6 py-3.5 text-sm font-bold text-white disabled:opacity-70">${state.generating ? '<span class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"></span>Generating designs...' : "✦ Generate AI House Designs"}</button></div></div>${state.generated ? generatedConcepts() : `<div class="mt-8 rounded-3xl border border-[#dce3da] bg-[#edf2eb] p-6"><div class="flex gap-4"><div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-[#31543e] shadow-sm">✦</div><div><div class="font-bold text-[#31543e]">What will BhoomiAI generate?</div><div class="mt-1 max-w-3xl text-sm leading-6 text-[#718078]">Multiple house concepts based on your plot dimensions, orientation, family requirements, preferred style, budget, parking, outdoor spaces and Vastu preferences.</div></div></div></div>`}</div>`;
+      }
+
+      function generateDesigns() {
+        state.generating = true;
+        state.generated = false;
+        render();
+        setTimeout(() => {
+          state.generating = false;
+          state.generated = true;
+          state.selectedDesign = 0;
+          saveProject();
+          render();
+        }, 350);
+      }
+
+      function concept(sel, n, t, d, a, f, b, s, style) {
+        return `<button onclick="state.selectedDesign=${n - 1};render()" class="group overflow-hidden rounded-3xl border bg-white text-left shadow-sm transition hover:-translate-y-1 hover:shadow-lg ${sel ? "border-[#5d8067] ring-2 ring-[#dbe9da]" : "border-[#dce3da]"}"><div class="relative h-60 overflow-hidden bg-[#dfe8dc]"><div class="absolute inset-0" style="background-image:linear-gradient(135deg,rgba(255,255,255,.35) 1px,transparent 1px);background-size:28px 28px"></div><div class="absolute bottom-0 left-0 right-0 h-20 bg-[#b9cfad]"></div><div class="absolute bottom-12 left-1/2 h-24 w-40 -translate-x-1/2 bg-[#f2eee5] shadow-xl"><div class="absolute -top-14 left-[-12px] h-0 w-0 border-l-[92px] border-r-[92px] border-b-[65px] border-l-transparent border-r-transparent ${a === "vastu" ? "border-b-[#866e55]" : a === "courtyard" ? "border-b-[#708d76]" : "border-b-[#657f70]"}"></div><div class="absolute left-6 top-8 h-10 w-7 bg-[#7899a6]"></div><div class="absolute right-6 top-8 h-10 w-7 bg-[#7899a6]"></div><div class="absolute bottom-0 left-1/2 h-12 w-8 -translate-x-1/2 bg-[#765a45]"></div>${a === "courtyard" ? '<div class="absolute left-1/2 top-3 h-10 w-10 -translate-x-1/2 rounded-full border-4 border-[#91a98d] bg-[#b9cfad]"></div>' : ""}</div><div class="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1.5 text-xs font-bold text-[#31543e] shadow">Concept ${n}</div>${sel ? '<div class="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-[#163d2b] text-sm font-bold text-white shadow">✓</div>' : ""}</div><div class="p-5"><div class="text-xs font-bold uppercase tracking-[0.15em] text-[#7b877f]">${style}</div><h3 class="mt-2 text-xl font-bold">${t}</h3><p class="mt-2 text-sm leading-6 text-[#758179]">${d}</p><div class="mt-5 grid grid-cols-3 gap-2"><div class="rounded-xl bg-[#f4f6f2] p-3"><div class="text-[10px] uppercase tracking-wider text-[#7d8982]">Area</div><div class="mt-1 text-xs font-bold">${a ? f : ""}</div></div><div class="rounded-xl bg-[#f4f6f2] p-3"><div class="text-[10px] uppercase tracking-wider text-[#7d8982]">Floors</div><div class="mt-1 text-xs font-bold">${b}</div></div><div class="rounded-xl bg-[#f4f6f2] p-3"><div class="text-[10px] uppercase tracking-wider text-[#7d8982]">Home</div><div class="mt-1 text-xs font-bold">${s}</div></div></div></div></button>`;
+      }
+
+      function generatedConcepts() {
+        const names = [
+          "Modern Courtyard",
+          "Contemporary Family",
+          "Vastu Harmony",
+        ];
+        return `<div class="mt-8"><div class="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><div class="text-xs font-bold uppercase tracking-[0.18em] text-[#7b877f]">Design concept previews</div><h2 class="mt-2 text-2xl font-bold">Choose your preferred direction</h2><p class="mt-2 text-sm text-[#758179]">These are frontend concept previews. They are not generated architectural drawings and should be validated before use.</p></div><div class="rounded-full bg-[#e8f0e7] px-4 py-2 text-xs font-bold text-[#396148]">3 concepts generated</div></div><div class="grid gap-5 lg:grid-cols-3">${concept(state.selectedDesign === 0, 1, "Modern Courtyard", "Open, bright family home with a central courtyard.", "courtyard", "2,050 sq.ft", "2 Floors", "3 BHK", "Modern")}${concept(state.selectedDesign === 1, 2, "Contemporary Family", "Efficient family layout with spacious living areas.", "modern", "1,950 sq.ft", "2 Floors", "3 BHK", "Contemporary")}${concept(state.selectedDesign === 2, 3, "Vastu Harmony", "Direction-aware layout focused on Vastu principles.", "vastu", "2,100 sq.ft", "2 Floors", "3 BHK", "Traditional Modern")}</div><div class="mt-6 rounded-3xl border border-[#d6e0d5] bg-white p-6 shadow-sm"><div class="flex flex-col justify-between gap-5 md:flex-row md:items-center"><div><div class="text-xs font-bold uppercase tracking-[0.18em] text-[#7b877f]">Selected concept</div><h3 class="mt-2 text-xl font-bold">${names[state.selectedDesign]}</h3><p class="mt-1 text-sm text-[#758179]">This concept will be used for your detailed floor plan.</p></div><button onclick="nav('3D Studio')" class="rounded-xl bg-[#163d2b] px-6 py-3.5 text-sm font-bold text-white shadow-sm">Continue to Floor Plan →</button></div></div></div>`;
+      }
+
+      function costEstimate() {
+        const area = plotArea(),
+          built = builtUpArea(),
+          rate = Number(state.costRate) || 1800,
+          total = built * rate;
+        return `<div class="mx-auto max-w-7xl p-5 md:p-8 lg:p-10"><button onclick="nav('Overview')" class="mb-3 text-sm font-semibold text-[#5f7166]">← Back to Dashboard</button><div class="text-sm font-medium text-[#758179]">Planning tool</div><h1 class="mt-1 text-3xl font-bold tracking-tight md:text-4xl">Construction Cost Estimate</h1><p class="mt-2 max-w-2xl text-sm leading-6 text-[#758179]">Change the assumptions to create an indicative budget. This is a transparent calculator, not a contractor quotation.</p><div class="mt-8 grid gap-6 xl:grid-cols-[1fr_1fr]"><div class="rounded-3xl border border-[#dce3da] bg-white p-6 shadow-sm"><h2 class="text-xl font-bold">Project assumptions</h2><div class="mt-5 grid gap-4 sm:grid-cols-2"><div><label class="mb-2 block text-xs font-bold text-[#526159]">Plot length (ft)</label><input type="number" min="1" value="${esc(state.siteData.length)}" onchange="state.siteData.length=this.value;render()" class="w-full rounded-xl border border-[#d5ded5] bg-[#fafbf9] px-4 py-3 text-sm"></div><div><label class="mb-2 block text-xs font-bold text-[#526159]">Plot width (ft)</label><input type="number" min="1" value="${esc(state.siteData.width)}" onchange="state.siteData.width=this.value;render()" class="w-full rounded-xl border border-[#d5ded5] bg-[#fafbf9] px-4 py-3 text-sm"></div><div><label class="mb-2 block text-xs font-bold text-[#526159]">Floors</label><select onchange="state.requirements.floors=this.value;render()" class="w-full rounded-xl border border-[#d5ded5] bg-[#fafbf9] px-4 py-3 text-sm">${["1 Floor", "2 Floors", "3 Floors"].map((x) => `<option ${state.requirements.floors === x ? "selected" : ""}>${x}</option>`).join("")}</select></div><div><label class="mb-2 block text-xs font-bold text-[#526159]">Assumed rate (₹/sq.ft)</label><input type="number" min="500" step="50" value="${esc(state.costRate)}" onchange="state.costRate=this.value;render()" class="w-full rounded-xl border border-[#d5ded5] bg-[#fafbf9] px-4 py-3 text-sm"></div></div><div class="mt-5 rounded-xl bg-[#f4f7f2] p-4 text-xs leading-5 text-[#748078]">Model assumption: 65% of plot area per floor is used as illustrative built-up area. Actual permitted coverage and usable area depend on local bylaws, setbacks, structure and design.</div></div><div class="rounded-3xl bg-[#163d2b] p-7 text-white shadow-sm"><div class="text-xs font-bold uppercase tracking-[0.18em] text-[#a9c1af]">Indicative base estimate</div><div class="mt-4 text-4xl font-bold">${money(total)}</div><div class="mt-2 text-sm text-[#c3d2c8]">Illustrative range: ${money(total * 0.85)} – ${money(total * 1.15)}</div><div class="mt-7 space-y-4">${costRow("Plot area", area.toLocaleString() + " sq.ft")}${costRow("Estimated built-up area", built.toLocaleString() + " sq.ft")}${costRow("Assumed rate", money(rate) + " / sq.ft")}${costRow("Base calculation", money(total))}${costRow("15% contingency guide", money(total * 0.15))}</div><button onclick="downloadReport()" class="mt-7 w-full rounded-xl bg-white px-5 py-3.5 text-sm font-bold text-[#163d2b]">Download project report</button></div></div><p class="mt-5 text-xs leading-5 text-[#758179]">Excludes or may not reflect land cost, architect/engineer fees, approvals, GST/taxes, utility connections, demolition, retaining walls, unusual foundations, interiors and local price variation. Have a local professional validate all figures.</p></div>`;
+      }
+
+      function costRow(label, value) {
+        return `<div class="flex items-center justify-between gap-4 border-b border-white/15 pb-3 text-sm"><span class="text-[#c3d2c8]">${label}</span><strong class="text-right">${value}</strong></div>`;
+      }
+
+      function myProjects() {
+        return `<div class="mx-auto max-w-7xl p-5 md:p-8 lg:p-10"><div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><div class="text-sm font-medium text-[#758179]">Workspace</div><h1 class="mt-1 text-3xl font-bold">My Projects</h1><p class="mt-2 text-sm text-[#758179]">Saved locally in this browser on this device.</p></div><button onclick="nav('Land Analysis')" class="rounded-xl bg-[#163d2b] px-5 py-3 text-sm font-bold text-white">+ New Project</button></div><div class="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-3">${state.projects.length ? state.projects.map((p) => `<div class="rounded-2xl border border-[#dce3da] bg-white p-5"><div class="text-xs text-[#7b877f]">Saved ${esc(p.savedAt)}</div><h2 class="mt-2 text-lg font-bold">${esc(p.name)}</h2><div class="mt-3 text-sm text-[#758179]">${Number(p.area || 0).toLocaleString()} sq.ft plot · ${esc(p.requirements?.floors || "1 Floor")}</div><div class="mt-5 flex gap-3"><button onclick="openProject(${p.id})" class="rounded-lg border border-[#d5ded5] px-3 py-2 text-xs font-bold">Open workspace</button><button onclick="downloadReport()" class="rounded-lg bg-[#163d2b] px-3 py-2 text-xs font-bold text-white">Export current report</button></div></div>`).join("") : `<div class="rounded-2xl border border-dashed border-[#cbd7cb] bg-white p-10 text-center md:col-span-2 xl:col-span-3"><h2 class="text-xl font-bold">No saved projects yet</h2><p class="mt-2 text-sm text-[#758179]">Run a land assessment or generate a design to save your first project.</p><button onclick="nav('Land Analysis')" class="mt-5 rounded-xl bg-[#163d2b] px-5 py-3 text-sm font-bold text-white">Start a project</button></div>`}</div></div>`;
+      }
+
+      function materialsPage() {
+        return `<div class="mx-auto max-w-7xl p-5 md:p-8 lg:p-10"><h1 class="text-3xl font-bold">Smart Materials</h1><p class="mt-2 max-w-2xl text-sm leading-6 text-[#758179]">A preliminary checklist for discussing material choices with a local architect or engineer. These are general considerations, not a site-specific recommendation.</p><div class="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-3">${[
+          [
+            "Structure",
+            "Structural concrete/steel and reinforcement must be specified by a qualified structural engineer.",
+          ],
+          [
+            "Walls",
+            "Compare locally available masonry systems for thermal comfort, cost and durability.",
+          ],
+          [
+            "Roof & insulation",
+            "Consider heat gain, waterproofing, drainage and maintenance.",
+          ],
+          [
+            "Windows & shading",
+            "Consider daylight, ventilation, solar exposure and rain protection.",
+          ],
+          [
+            "Water management",
+            "Plan roof-water drainage, rainwater harvesting feasibility and plumbing.",
+          ],
+          [
+            "Finishes",
+            "Choose flooring, paint and fixtures based on budget, durability and maintenance.",
+          ],
+        ]
+          .map(
+            (x) =>
+              `<div class="rounded-2xl border border-[#dce3da] bg-white p-5"><div class="font-bold">${x[0]}</div><p class="mt-2 text-sm leading-6 text-[#758179]">${x[1]}</p></div>`,
+          )
+          .join(
+            "",
+          )}</div><div class="mt-6 rounded-2xl bg-[#edf3eb] p-5 text-sm leading-6 text-[#526159]">Do not select structural materials from an AI suggestion alone. Soil conditions, seismic requirements, building codes and engineering calculations must guide final specifications.</div></div>`;
+      }
+
+      function profilePage() {
+        return `<div class="mx-auto max-w-4xl p-5 md:p-8 lg:p-10"><h1 class="text-3xl font-bold">Profile</h1><div class="mt-7 rounded-3xl border border-[#dce3da] bg-white p-6"><div class="text-sm text-[#758179]">Current browser session</div><div class="mt-2 text-xl font-bold">${esc(state.formData.name || "BhoomiAI Demo User")}</div><div class="mt-1 text-sm text-[#758179]">${esc(state.formData.email || "No email entered")}</div><p class="mt-5 text-sm leading-6 text-[#758179]">This prototype does not use real authentication. Profile details are not verified or synced to a server.</p><button onclick="logout()" class="mt-5 rounded-xl bg-[#163d2b] px-5 py-3 text-sm font-bold text-white">Log out of demo</button></div></div>`;
+      }
+
+      function threeDStudio() {
+        return `<div class="mx-auto max-w-[1600px] p-4 md:p-8">
+          <div class="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div>
+              <button onclick="nav('Overview')" class="mb-3 text-sm font-semibold text-[#5f7166]">← Back to Dashboard</button>
+              <div class="text-sm font-medium text-[#758179]">BhoomiAI workspace</div>
+              <h1 class="mt-1 text-3xl font-bold tracking-tight md:text-4xl">3D House Studio</h1>
+              <p class="mt-2 max-w-2xl text-sm leading-6 text-[#758179]">Open the integrated 3D house visualizer here. If the embedded view is blocked by the hosting site's security settings, use the button to open it directly.</p>
+            </div>
+            <a href="https://peppy-bonbon-c27bef.netlify.app/" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center rounded-xl bg-[#163d2b] px-5 py-3 text-sm font-bold text-white">Open 3D Studio in new tab ↗</a>
+          </div>
+          <div class="overflow-hidden rounded-3xl border border-[#dce3da] bg-white shadow-sm">
+            <iframe title="BhoomiAI 3D House Visualizer" src="https://peppy-bonbon-c27bef.netlify.app/" class="block h-[75vh] min-h-[560px] w-full border-0" loading="lazy" allow="fullscreen; xr-spatial-tracking" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+          </div>
+          <p class="mt-3 text-xs leading-5 text-[#758179]">Note: this connects to your deployed Netlify app. The visualizer is hosted separately, so its own loading or embedding restrictions may apply.</p>
+        </div>`;
+      }
+
+      function placeholder(t) {
+        return `<div class="mx-auto flex min-h-screen max-w-5xl items-center justify-center p-6"><div class="w-full rounded-3xl border border-[#dce3da] bg-white p-10 text-center shadow-sm"><div class="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[#e5eee3] text-2xl text-[#31543e]">✦</div><div class="mt-6 text-xs font-bold uppercase tracking-[0.2em] text-[#7b877f]">BhoomiAI Workspace</div><h1 class="mt-3 text-3xl font-bold">${esc(t)}</h1><p class="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#758179]">This 3D Studio is ready for your teammate's model integration. Connect the selected concept to the 3D viewer when that component is ready.</p><button onclick="nav('Overview')" class="mt-7 rounded-xl bg-[#163d2b] px-6 py-3 text-sm font-bold text-white">← Back to Dashboard</button></div></div>`;
+      }
+
+      function seller() {
+        return `<main class="min-h-screen bg-[#f4f6f1] p-6"><div class="mx-auto max-w-5xl"><div class="flex items-center justify-between"><div class="flex items-center gap-3"><div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#163d2b] text-white">◈</div><div><div class="font-bold">BhoomiAI</div><div class="text-[10px] uppercase tracking-[0.2em] text-[#7a867f]">Seller</div></div></div><button onclick="logout()" class="rounded-xl border border-[#d3ddd3] px-4 py-2 text-sm font-semibold">Logout</button></div><div class="mt-20 rounded-3xl border border-[#dce3da] bg-white p-10 text-center shadow-sm"><div class="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[#e5eee3] text-2xl text-[#31543e]">◇</div><h1 class="mt-6 text-3xl font-bold">Seller Dashboard</h1><p class="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#758179]">Your seller workspace will allow you to receive project requirements, submit quotations and showcase construction materials and services.</p><div class="mt-7 inline-flex rounded-full bg-[#edf3eb] px-5 py-2 text-xs font-bold text-[#396148]">Seller module coming next</div></div></div></main>`;
+      }
+
+      function input(label, key, type = "text", ph = "") {
+        return `<div><label class="mb-2 block text-xs font-bold text-[#526159]">${label}</label><input type="${type}" ${key === "email" ? 'autocomplete="email"' : ""} value="${esc(state.formData[key])}" oninput="state.formData.${key}=this.value" placeholder="${ph}" required class="w-full rounded-xl border border-[#d5ded5] bg-[#fafbf9] px-4 py-3 text-sm outline-none transition focus:border-[#78967e] focus:ring-2 focus:ring-[#dfeade]"></div>`;
+      }
+
+      function auth() {
+        return `<div class="fixed inset-0 z-50 flex items-center justify-center bg-[#10271c]/60 p-4 backdrop-blur-sm"><div class="relative max-h-[92vh] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl md:p-8"><button onclick="state.showAuth=false;render()" class="absolute right-5 top-5 flex h-9 w-9 items-center justify-center rounded-full bg-[#f0f3ee] text-[#65736b]">×</button><div class="pr-10"><div class="flex items-center gap-3"><div class="flex h-11 w-11 items-center justify-center rounded-xl bg-[#163d2b] text-white">◈</div><div><div class="font-bold">BhoomiAI</div><div class="text-[9px] uppercase tracking-[0.2em] text-[#7b877f]">Land to Home</div></div></div><h2 class="mt-7 text-2xl font-bold">${state.authMode === "login" ? "Welcome back" : "Create your BhoomiAI account"}</h2><p class="mt-2 text-sm text-[#758179]">${state.authMode === "login" ? "Continue your home design journey." : "Choose your account type to get started."}</p></div><div class="mt-6 grid grid-cols-2 rounded-xl bg-[#f1f4ef] p-1"><button onclick="state.authMode='login';render()" class="rounded-lg py-2.5 text-sm font-semibold ${state.authMode === "login" ? "bg-white text-[#163d2b] shadow-sm" : "text-[#758179]"}">Login</button><button onclick="state.authMode='signup';render()" class="rounded-lg py-2.5 text-sm font-semibold ${state.authMode === "signup" ? "bg-white text-[#163d2b] shadow-sm" : "text-[#758179]"}">Sign Up</button></div><form onsubmit="authSubmit(event)" class="mt-6">${state.authMode === "signup" ? `<div class="mb-5 text-xs font-bold uppercase tracking-[0.15em] text-[#7b877f]">Account type</div><div class="grid grid-cols-2 gap-3"><button type="button" onclick="state.role='consumer';render()" class="rounded-2xl border p-4 text-left ${state.role === "consumer" ? "border-[#7d9a82] bg-[#edf3eb]" : "border-[#dce3da]"}"><div class="text-lg">⌂</div><div class="mt-2 text-sm font-bold">Consumer</div><div class="mt-1 text-xs text-[#7b877f]">Design your home</div></button><button type="button" onclick="state.role='seller';render()" class="rounded-2xl border p-4 text-left ${state.role === "seller" ? "border-[#7d9a82] bg-[#edf3eb]" : "border-[#dce3da]"}"><div class="text-lg">◇</div><div class="mt-2 text-sm font-bold">Seller</div><div class="mt-1 text-xs text-[#7b877f]">Offer products/services</div></button></div><div class="mt-5">${input("Full Name", "name", "text", "Your name")}</div><div class="mt-4">${input("Contact Number", "contact", "text", "+91 XXXXX XXXXX")}</div><div class="mt-4">${input("Location", "location", "text", "City, State")}</div>${state.role === "seller" ? `<div class="mt-4">${input("Experience", "experience", "text", "e.g. 8 years")}</div>` : ""}` : ""}<div class="${state.authMode === "signup" ? "mt-4" : ""}">${input("Email", "email", "email", "you@example.com")}</div><div class="mt-4">${input("Password", "password", "password", "••••••••")}</div>${state.authError ? `<div role="alert" class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">${esc(state.authError)}</div>` : ""}<button type="submit" class="mt-6 w-full rounded-xl bg-[#163d2b] px-5 py-3.5 text-sm font-bold text-white">${state.authMode === "login" ? "Login to BhoomiAI →" : `Create ${state.role === "consumer" ? "Consumer" : "Seller"} Account →`}</button><div class="mt-5 text-center text-xs text-[#7b877f]">Frontend demo — backend authentication will be connected later.</div></form></div></div>`;
+      }
+
+      function nav(x) {
+        state.active = x;
+        render();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+
+      function render() {
+        let html =
+          state.screen === "landing"
+            ? landing()
+            : state.screen === "dashboard"
+              ? dashboard()
+              : seller();
+        app.innerHTML = html + (state.showAuth ? auth() : "");
+      }
+      render();
+    </script>
+  </body>
+</html>
